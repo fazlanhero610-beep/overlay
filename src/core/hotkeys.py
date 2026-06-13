@@ -12,7 +12,7 @@ class HotkeyManager(QObject):
         
         # Default hotkeys
         self.hotkeys = {
-            'show_control_panel': 'ctrl+alt+o',
+            'show_control_panel': 'ctrl+shift+o',
             'toggle_lock': 'ctrl+shift+l',
             'toggle_visibility': 'ctrl+shift+h'
         }

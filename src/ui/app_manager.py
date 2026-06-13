@@ -32,7 +32,7 @@ class AppManager(QObject):
         
         # Load hotkeys
         default_hotkeys = {
-            'show_control_panel': 'ctrl+alt+o',
+            'show_control_panel': 'ctrl+shift+o',
             'toggle_lock': 'ctrl+shift+l',
             'toggle_visibility': 'ctrl+shift+h'
         }
@@ -43,6 +43,9 @@ class AppManager(QObject):
         self.hotkey_manager.toggle_lock_signal.connect(self.toggle_lock)
         self.hotkey_manager.toggle_visibility_signal.connect(self.toggle_visibility)
         
+        # Show control panel on startup
+        self.show_control_panel()
+
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(self.app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
@@ -50,7 +53,7 @@ class AppManager(QObject):
         # Create context menu
         self.tray_menu = QMenu()
         
-        show_action = self.tray_menu.addAction("Show Control Panel (Ctrl+Alt+O)")
+        show_action = self.tray_menu.addAction("Show Control Panel (Ctrl+Shift+O)")
         show_action.triggered.connect(self.show_control_panel)
         
         settings_action = self.tray_menu.addAction("Hotkey Settings...")

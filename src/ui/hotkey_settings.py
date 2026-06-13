@@ -17,7 +17,7 @@ class HotkeySettingsDialog(QDialog):
         layout = QVBoxLayout()
         
         # Instructions
-        layout.addWidget(QLabel("Format: 'ctrl+alt+o', 'shift+space', etc."))
+        layout.addWidget(QLabel("Format: 'ctrl+shift+o', 'shift+space', etc."))
         
         # Inputs
         self.inputs = {}
