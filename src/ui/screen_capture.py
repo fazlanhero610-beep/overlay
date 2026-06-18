@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QWidget, QLabel, QApplication
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRect
 from PyQt6.QtGui import QPainter, QColor, QPixmap
 
 class ScreenCaptureWindow(QWidget):
@@ -79,7 +79,7 @@ class ScreenCaptureWindow(QWidget):
             if screen:
                 # Capture area around mouse
                 capture_size = loupe_size // zoom
-                rect = Qt.QRect(
+                rect = QRect(
                     int(mx - capture_size // 2), 
                     int(my - capture_size // 2), 
                     capture_size, 
