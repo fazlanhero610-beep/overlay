@@ -32,6 +32,17 @@ class ImageProcessor:
         self.manual_scale = 1.0
         self.manual_rotation = 0.0
 
+    def clear_image(self):
+        """Resets the processor state, clearing any loaded image."""
+        self.original_image = None
+        self.current_image = None
+        self.warped_image = None
+        self.transform_matrix = np.eye(3)
+        self.manual_offset_x = 0.0
+        self.manual_offset_y = 0.0
+        self.manual_scale = 1.0
+        self.manual_rotation = 0.0
+
     def load_image(self, file_path):
         # cv2.imread usually reads BGR. For tiff/png with alpha it might be BGRA
         # We will standardize on BGRA internally so we can manipulate opacity easily.

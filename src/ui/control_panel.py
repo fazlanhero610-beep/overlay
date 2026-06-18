@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QSlider, QComboBox, QFileDialog, QGroupBox, QMessageBox,
-    QCheckBox
+    QCheckBox, QDialog, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -45,6 +45,7 @@ class ControlPanel(QMainWindow):
         main_layout = QVBoxLayout()
         
         # --- File Operations ---
+        file_group = QGroupBox("File & Image Operations")
         file_layout = QHBoxLayout()
         load_btn = QPushButton("Load Image")
         load_btn.clicked.connect(self.load_image)
@@ -52,10 +53,16 @@ class ControlPanel(QMainWindow):
         load_proj_btn.clicked.connect(self.load_project)
         save_btn = QPushButton("Save / Export")
         save_btn.clicked.connect(self.save_work)
+        clear_btn = QPushButton("Clear Image")
+        clear_btn.setStyleSheet("background-color: #662222;") # give it a slight red tint
+        clear_btn.clicked.connect(self.clear_image)
+
         file_layout.addWidget(load_btn)
         file_layout.addWidget(load_proj_btn)
         file_layout.addWidget(save_btn)
-        main_layout.addLayout(file_layout)
+        file_layout.addWidget(clear_btn)
+        file_group.setLayout(file_layout)
+        main_layout.addWidget(file_group)
         
         # --- Image Preview ---
         self.preview_label = QLabel("No Image Loaded")
@@ -218,6 +225,19 @@ class ControlPanel(QMainWindow):
         
         align_group.setLayout(align_layout)
         main_layout.addWidget(align_group)
+
+        # --- App Actions ---
+        app_actions_layout = QHBoxLayout()
+        help_btn = QPushButton("Help / Instructions")
+        help_btn.setStyleSheet("background-color: #005A9E; font-weight: bold;")
+        help_btn.clicked.connect(self.show_help)
+        exit_btn = QPushButton("Exit App")
+        exit_btn.setStyleSheet("background-color: #8b0000; font-weight: bold;")
+        exit_btn.clicked.connect(self.exit_app)
+        app_actions_layout.addWidget(help_btn)
+        app_actions_layout.addStretch()
+        app_actions_layout.addWidget(exit_btn)
+        main_layout.addLayout(app_actions_layout)
         
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
@@ -235,6 +255,110 @@ class ControlPanel(QMainWindow):
                 self.on_adjustment_changed()
             else:
                 QMessageBox.critical(self, "Error", "Failed to load image.")
+
+    def clear_image(self):
+        """Clears the loaded image from the processor and UI."""
+        self.processor.clear_image()
+        self.current_image_path = None
+        self.preview_label.setPixmap(QPixmap())
+        self.preview_label.setText("No Image Loaded")
+        self.info_label.setText("Image cleared.")
+
+        # Reset sliders to default without triggering update signals for each
+        self.x_slider.blockSignals(True)
+        self.y_slider.blockSignals(True)
+        self.s_slider.blockSignals(True)
+        self.r_slider.blockSignals(True)
+
+        self.x_slider.setValue(0)
+        self.y_slider.setValue(0)
+        self.s_slider.setValue(100)
+        self.r_slider.setValue(0)
+
+        self.x_slider.blockSignals(False)
+        self.y_slider.blockSignals(False)
+        self.s_slider.blockSignals(False)
+        self.r_slider.blockSignals(False)
+
+        self.request_overlay_update()
+
+    def exit_app(self):
+        """Sends a quit signal to the main application."""
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().quit()
+
+    def show_help(self):
+        """Displays a detailed help and instructions dialog."""
+        help_dialog = QDialog(self)
+        help_dialog.setWindowTitle("Help & Instructions")
+        help_dialog.setMinimumSize(500, 600)
+
+        layout = QVBoxLayout(help_dialog)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+
+        instructions = QLabel(
+            "<h2>Image Overlay Workflow & Instructions</h2>"
+            "<p>Welcome to the Image Overlay application! This tool allows you to overlay images on your screen and perfectly align them using alignment points, manual transformations, and visual adjustments.</p>"
+
+            "<h3>1. Load an Image</h3>"
+            "<p>Click <b>Load Image</b> to choose an image (PNG, JPG, TIFF) you wish to overlay on your screen.</p>"
+
+            "<h3>2. Visual Adjustments</h3>"
+            "<ul>"
+            "<li><b>Opacity:</b> Adjust the transparency of the overlay image.</li>"
+            "<li><b>Brightness & Contrast:</b> Fine-tune how the image looks.</li>"
+            "<li><b>Filter:</b> Apply Edge detection or Grayscale. Edge detection is highly recommended for tracing workflows!</li>"
+            "<li><b>Remove Color:</b> Easily remove pure white or black backgrounds using the tolerance slider.</li>"
+            "</ul>"
+
+            "<h3>3. Aligning the Image to the Screen</h3>"
+            "<p>The core feature of this app is aligning an image to specific points on your screen.</p>"
+            "<ol>"
+            "<li>Under <b>Alignment</b>, select a Method (1-Point, 2-Point, or 3-Point alignment).</li>"
+            "<li>Click <b>Start Alignment Process</b>.</li>"
+            "<li>Click the required number of points on the <b>Image Preview</b> above.</li>"
+            "<li>Once you finish clicking on the image preview, a large crosshair will appear on your screen.</li>"
+            "<li>Click the matching points on your <b>actual screen</b>. The image will automatically warp, rotate, and scale to match your screen points!</li>"
+            "</ol>"
+
+            "<h3>4. Manual Adjustments & Nudging</h3>"
+            "<p>After alignment (or instead of it), you can manually tweak the position using the <b>Manual Transform</b> sliders.</p>"
+            "<p><b>Pro-tip:</b> Click anywhere inside the Control Panel so it has focus, then use your keyboard:</p>"
+            "<ul>"
+            "<li><b>Arrow Keys:</b> Nudge X and Y position.</li>"
+            "<li><b>Shift + Up/Down:</b> Nudge Scale.</li>"
+            "<li><b>Ctrl + Left/Right:</b> Nudge Rotation.</li>"
+            "</ul>"
+
+            "<h3>5. Managing Your Workspace</h3>"
+            "<ul>"
+            "<li><b>Clear Image:</b> Removes the active image from the overlay.</li>"
+            "<li><b>Save / Export:</b> Save your current adjustments and alignments as a Project file to resume later, or Export the warped image as a PNG.</li>"
+            "</ul>"
+
+            "<h3>6. Hotkeys</h3>"
+            "<ul>"
+            "<li><b>Ctrl+Shift+O:</b> Show this Control Panel.</li>"
+            "<li><b>Ctrl+Shift+L:</b> Toggle overlay lock (makes the overlay ignore mouse clicks so you can click through it).</li>"
+            "<li><b>Ctrl+Shift+H:</b> Toggle overlay visibility (hide/show).</li>"
+            "</ul>"
+        )
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("font-size: 14px; line-height: 1.5;")
+
+        content_layout.addWidget(instructions)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(help_dialog.accept)
+        layout.addWidget(close_btn)
+
+        help_dialog.exec()
 
     def on_tools_changed(self):
         self.processor.set_overlay_tools(self.crosshair_cb.isChecked(), self.grid_cb.isChecked())
