@@ -21,9 +21,21 @@ class HotkeySettingsDialog(QDialog):
         
         # Inputs
         self.inputs = {}
+        friendly_names = {
+            'show_control_panel': 'Show Control Panel',
+            'toggle_lock': 'Toggle Overlay Lock',
+            'toggle_visibility': 'Toggle Visibility',
+            'nudge_up': 'Nudge Image Up',
+            'nudge_down': 'Nudge Image Down',
+            'nudge_left': 'Nudge Image Left',
+            'nudge_right': 'Nudge Image Right',
+            'opacity_up': 'Increase Opacity',
+            'opacity_down': 'Decrease Opacity'
+        }
         for action, key_str in self.current_hotkeys.items():
             row = QHBoxLayout()
-            row.addWidget(QLabel(action.replace("_", " ").title()))
+            label_text = friendly_names.get(action, action.replace("_", " ").title())
+            row.addWidget(QLabel(label_text))
             
             line_edit = QLineEdit(key_str)
             self.inputs[action] = line_edit

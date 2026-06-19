@@ -32,6 +32,12 @@ class ImageProcessor:
         self.manual_scale = 1.0
         self.manual_rotation = 0.0
 
+    def crop_image(self, x, y, w, h):
+        """Permanently crops the loaded image."""
+        if self.original_image is not None:
+            self.original_image = self.original_image[y:y+h, x:x+w]
+            self.process()
+
     def clear_image(self):
         """Resets the processor state, clearing any loaded image."""
         self.original_image = None
@@ -119,6 +125,28 @@ class ImageProcessor:
             # Invert only RGB, keep A
             rgb = 255 - img[:, :, :3]
             img[:, :, :3] = rgb
+
+        elif self.filter_mode == "Blur":
+            blurred = cv2.GaussianBlur(img[:, :, :3], (15, 15), 0)
+            img[:, :, :3] = blurred
+
+        elif self.filter_mode == "Sharpen":
+            kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+            sharpened = cv2.filter2D(img[:, :, :3], -1, kernel)
+            img[:, :, :3] = sharpened
+
+        elif self.filter_mode == "Red Tint":
+            # Zero out B and G channels
+            img[:, :, 0] = 0 # Blue
+            img[:, :, 1] = 0 # Green
+
+        elif self.filter_mode == "Green Tint":
+            img[:, :, 0] = 0 # Blue
+            img[:, :, 2] = 0 # Red
+
+        elif self.filter_mode == "Blue Tint":
+            img[:, :, 1] = 0 # Green
+            img[:, :, 2] = 0 # Red
 
         # 2. Apply Brightness and Contrast
         # cv2.convertScaleAbs does: dst = src * alpha + beta

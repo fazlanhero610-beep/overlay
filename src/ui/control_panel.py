@@ -1,10 +1,10 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QSlider, QComboBox, QFileDialog, QGroupBox, QMessageBox,
-    QCheckBox, QDialog, QScrollArea, QSplitter, QTabWidget
+    QCheckBox, QDialog, QScrollArea, QSplitter, QTabWidget, QColorDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QColor
 import json
 
 from core.image_processor import ImageProcessor
@@ -13,6 +13,7 @@ from ui.zoomable_view import ZoomableGraphicsView
 class ControlPanel(QMainWindow):
     # Signals to request screen alignment from main AppManager
     request_screen_alignment = pyqtSignal(int) # int is number of points (1, 2, 3)
+    request_screen_snip = pyqtSignal()
     
     def __init__(self, processor: ImageProcessor):
         super().__init__()
@@ -119,7 +120,18 @@ class ControlPanel(QMainWindow):
         self.preview_view.setMinimumWidth(300)
         self.preview_view.setStyleSheet("background-color: #1e1e1e; border: 1px solid #555555;")
         self.preview_view.clicked_point.connect(self.on_preview_clicked_point)
+        self.preview_view.crop_requested.connect(self.perform_crop)
         left_layout.addWidget(self.preview_view)
+
+        # Add crop button below preview
+        crop_btn_layout = QHBoxLayout()
+        self.start_crop_btn = QPushButton("Crop Image Tool")
+        self.start_crop_btn.clicked.connect(self.toggle_crop_mode)
+        self.start_crop_btn.setCheckable(True)
+        self.start_crop_btn.setEnabled(False) # Disabled until image loaded
+        crop_btn_layout.addStretch()
+        crop_btn_layout.addWidget(self.start_crop_btn)
+        left_layout.addLayout(crop_btn_layout)
 
         splitter.addWidget(left_widget)
 
@@ -143,8 +155,10 @@ class ControlPanel(QMainWindow):
         file_group = QGroupBox("File & Image Operations")
         file_group_layout = QVBoxLayout()
 
-        load_btn = QPushButton("Load Image")
+        load_btn = QPushButton("Load Image File")
         load_btn.clicked.connect(self.load_image)
+        snip_btn = QPushButton("Snip Screen to Load")
+        snip_btn.clicked.connect(self.request_screen_snip.emit)
         load_proj_btn = QPushButton("Load Project")
         load_proj_btn.clicked.connect(self.load_project)
         save_btn = QPushButton("Save / Export")
@@ -154,6 +168,7 @@ class ControlPanel(QMainWindow):
         clear_btn.clicked.connect(self.clear_image)
 
         file_group_layout.addWidget(load_btn)
+        file_group_layout.addWidget(snip_btn)
         file_group_layout.addWidget(load_proj_btn)
         file_group_layout.addWidget(save_btn)
         file_group_layout.addWidget(clear_btn)
@@ -169,7 +184,7 @@ class ControlPanel(QMainWindow):
         exit_btn = QPushButton("Exit App")
         exit_btn.setStyleSheet("background-color: #8b0000; font-weight: bold;")
         exit_btn.clicked.connect(self.exit_app)
-        
+
         app_group_layout.addWidget(help_btn)
         app_group_layout.addWidget(exit_btn)
         app_group.setLayout(app_group_layout)
@@ -219,7 +234,7 @@ class ControlPanel(QMainWindow):
         fl_layout = QHBoxLayout()
         fl_layout.addWidget(QLabel("Filter"))
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["None", "Edge", "Grayscale", "Invert"])
+        self.filter_combo.addItems(["None", "Edge", "Grayscale", "Invert", "Blur", "Sharpen", "Red Tint", "Green Tint", "Blue Tint"])
         self.filter_combo.currentTextChanged.connect(self.on_adjustment_changed)
         fl_layout.addWidget(self.filter_combo)
         adj_layout.addLayout(fl_layout)
@@ -228,11 +243,13 @@ class ControlPanel(QMainWindow):
         key_layout = QHBoxLayout()
         key_layout.addWidget(QLabel("Remove Color"))
         self.key_combo = QComboBox()
-        self.key_combo.addItems(["None", "Black", "White"])
-        self.key_combo.setToolTip("Removes pure white or black from the image")
-        self.key_combo.currentTextChanged.connect(self.on_adjustment_changed)
+        self.key_combo.addItems(["None", "Black", "White", "Custom..."])
+        self.key_combo.setToolTip("Removes a specific color from the image")
+        self.key_combo.currentTextChanged.connect(self.on_color_key_combo_changed)
         key_layout.addWidget(self.key_combo)
         
+        self.custom_color = None
+
         self.key_tol_slider = QSlider(Qt.Orientation.Horizontal)
         self.key_tol_slider.setRange(0, 255)
         self.key_tol_slider.setValue(10)
@@ -342,6 +359,10 @@ class ControlPanel(QMainWindow):
         # Tab 0 is File, always enabled. Tab 1, 2, 3 require image
         for i in range(1, self.tabs.count()):
             self.tabs.setTabEnabled(i, enabled)
+        self.start_crop_btn.setEnabled(enabled)
+        if not enabled:
+            self.start_crop_btn.setChecked(False)
+            self.preview_view.set_cropping_mode(False)
 
     def load_image(self, file_path=None):
         if not file_path:
@@ -506,6 +527,20 @@ class ControlPanel(QMainWindow):
                 
         super().keyPressEvent(event)
 
+    def on_color_key_combo_changed(self, text):
+        if text == "Custom...":
+            color = QColorDialog.getColor(parent=self, title="Select Color to Remove")
+            if color.isValid():
+                # Store as BGR for OpenCV
+                self.custom_color = (color.blue(), color.green(), color.red())
+            else:
+                # If they cancelled, go back to None
+                self.key_combo.blockSignals(True)
+                self.key_combo.setCurrentText("None")
+                self.key_combo.blockSignals(False)
+                self.custom_color = None
+        self.on_adjustment_changed()
+
     def on_adjustment_changed(self):
         # Update processor state
         self.processor.set_opacity(self.op_slider.value() / 100.0)
@@ -518,6 +553,8 @@ class ControlPanel(QMainWindow):
             self.processor.set_color_key((0, 0, 0), self.key_tol_slider.value())
         elif key_mode == "White":
             self.processor.set_color_key((255, 255, 255), self.key_tol_slider.value())
+        elif key_mode == "Custom..." and self.custom_color is not None:
+            self.processor.set_color_key(self.custom_color, self.key_tol_slider.value())
         else:
             self.processor.set_color_key(None, 0)
         
@@ -549,6 +586,22 @@ class ControlPanel(QMainWindow):
         self.preview_view.set_selecting_mode(True)
         self.info_label.setText(f"Click {self.num_points_needed} point(s) on the image preview above.")
         self.start_align_btn.setEnabled(False)
+
+    def toggle_crop_mode(self, checked):
+        if checked:
+            self.preview_view.set_cropping_mode(True)
+            self.start_crop_btn.setText("Cancel Crop")
+        else:
+            self.preview_view.set_cropping_mode(False)
+            self.start_crop_btn.setText("Crop Image Tool")
+
+    def perform_crop(self, x, y, w, h):
+        self.processor.crop_image(x, y, w, h)
+        self.start_crop_btn.setChecked(False)
+        self.toggle_crop_mode(False)
+        self.update_preview()
+        self.request_overlay_update()
+        self.info_label.setText("Image cropped successfully.")
 
     def on_preview_clicked_point(self, img_x, img_y):
         if not self.selecting_image_points or self.processor.current_image is None:

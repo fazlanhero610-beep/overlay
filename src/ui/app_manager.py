@@ -26,7 +26,9 @@ class AppManager(QObject):
         # Connect signals
         self.control_panel.update_callback = self.update_overlay_image
         self.control_panel.request_screen_alignment.connect(self.start_screen_alignment)
+        self.control_panel.request_screen_snip.connect(self.start_screen_snip)
         self.screen_capture.points_selected.connect(self.process_alignment)
+        self.screen_capture.region_captured.connect(self.process_snip)
         
         self.setup_tray()
         
@@ -34,7 +36,13 @@ class AppManager(QObject):
         default_hotkeys = {
             'show_control_panel': 'ctrl+shift+o',
             'toggle_lock': 'ctrl+shift+l',
-            'toggle_visibility': 'ctrl+shift+h'
+            'toggle_visibility': 'ctrl+shift+h',
+            'nudge_up': 'alt+up',
+            'nudge_down': 'alt+down',
+            'nudge_left': 'alt+left',
+            'nudge_right': 'alt+right',
+            'opacity_up': 'alt+page up',
+            'opacity_down': 'alt+page down'
         }
         loaded_hotkeys = load_hotkey_config(default_hotkeys)
         
@@ -43,6 +51,14 @@ class AppManager(QObject):
         self.hotkey_manager.toggle_lock_signal.connect(self.toggle_lock)
         self.hotkey_manager.toggle_visibility_signal.connect(self.toggle_visibility)
         
+        # Connect new nudge/opacity hotkeys
+        self.hotkey_manager.nudge_up_signal.connect(lambda: self.nudge_image(0, -1))
+        self.hotkey_manager.nudge_down_signal.connect(lambda: self.nudge_image(0, 1))
+        self.hotkey_manager.nudge_left_signal.connect(lambda: self.nudge_image(-1, 0))
+        self.hotkey_manager.nudge_right_signal.connect(lambda: self.nudge_image(1, 0))
+        self.hotkey_manager.opacity_up_signal.connect(lambda: self.adjust_opacity(5))
+        self.hotkey_manager.opacity_down_signal.connect(lambda: self.adjust_opacity(-5))
+
         # Show control panel on startup
         self.show_control_panel()
 
@@ -78,6 +94,28 @@ class AppManager(QObject):
         
         self.control_panel.hide()
         self.screen_capture.start_capture(num_points)
+
+    def start_screen_snip(self):
+        self.control_panel.hide()
+        self.screen_capture.start_snip()
+
+    def process_snip(self, pixmap):
+        self.control_panel.show()
+        if not pixmap.isNull():
+            import tempfile
+            import os
+            # Save QPixmap to temp file and load it via ImageProcessor
+            # OpenCV doesn't natively consume QPixmap easily without conversion logic
+            fd, path = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            pixmap.save(path, "PNG")
+            self.control_panel.load_image(path)
+
+            # Clean up temp file safely
+            try:
+                os.remove(path)
+            except:
+                pass
 
     def process_alignment(self, screen_points):
         self.control_panel.show()
@@ -125,6 +163,20 @@ class AppManager(QObject):
         print("Toggle Visibility triggered")
         if self.overlay_window:
             self.overlay_window.toggle_visibility()
+
+    def nudge_image(self, dx, dy):
+        if not self.image_processor.current_image is None:
+            # Update sliders in the control panel to stay in sync
+            curr_x = self.control_panel.x_slider.value()
+            curr_y = self.control_panel.y_slider.value()
+            self.control_panel.x_slider.setValue(curr_x + dx)
+            self.control_panel.y_slider.setValue(curr_y + dy)
+
+    def adjust_opacity(self, delta):
+        if not self.image_processor.current_image is None:
+            curr_op = self.control_panel.op_slider.value()
+            new_op = max(0, min(100, curr_op + delta))
+            self.control_panel.op_slider.setValue(new_op)
             
     def show_hotkey_settings(self):
         dialog = HotkeySettingsDialog(self.hotkey_manager.hotkeys)
