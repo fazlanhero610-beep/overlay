@@ -140,6 +140,24 @@ class ControlPanel(QMainWindow):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Layer Management
+        layer_group = QGroupBox("Layers")
+        layer_layout = QVBoxLayout(layer_group)
+        self.layer_combo = QComboBox()
+        self.layer_combo.currentIndexChanged.connect(self.on_layer_changed)
+
+        layer_btn_layout = QHBoxLayout()
+        add_layer_btn = QPushButton("Add Layer")
+        add_layer_btn.clicked.connect(self.load_image)
+        remove_layer_btn = QPushButton("Remove Layer")
+        remove_layer_btn.clicked.connect(self.remove_layer)
+        layer_btn_layout.addWidget(add_layer_btn)
+        layer_btn_layout.addWidget(remove_layer_btn)
+
+        layer_layout.addWidget(self.layer_combo)
+        layer_layout.addLayout(layer_btn_layout)
+        right_layout.addWidget(layer_group)
+
         self.tabs = QTabWidget()
         right_layout.addWidget(self.tabs)
         splitter.addWidget(right_widget)
@@ -152,22 +170,19 @@ class ControlPanel(QMainWindow):
         file_tab_layout = QVBoxLayout(file_tab)
 
         # File Operations Group
-        file_group = QGroupBox("File & Image Operations")
+        file_group = QGroupBox("File Operations")
         file_group_layout = QVBoxLayout()
 
-        load_btn = QPushButton("Load Image File")
-        load_btn.clicked.connect(self.load_image)
         snip_btn = QPushButton("Snip Screen to Load")
         snip_btn.clicked.connect(self.request_screen_snip.emit)
         load_proj_btn = QPushButton("Load Project")
         load_proj_btn.clicked.connect(self.load_project)
         save_btn = QPushButton("Save / Export")
         save_btn.clicked.connect(self.save_work)
-        clear_btn = QPushButton("Clear Image")
+        clear_btn = QPushButton("Clear All Layers")
         clear_btn.setStyleSheet("background-color: #662222;") # slight red tint
-        clear_btn.clicked.connect(self.clear_image)
+        clear_btn.clicked.connect(self.clear_all_layers)
 
-        file_group_layout.addWidget(load_btn)
         file_group_layout.addWidget(snip_btn)
         file_group_layout.addWidget(load_proj_btn)
         file_group_layout.addWidget(save_btn)
@@ -178,6 +193,10 @@ class ControlPanel(QMainWindow):
         # App Actions Group
         app_group = QGroupBox("Application Actions")
         app_group_layout = QVBoxLayout()
+
+        self.always_on_top_cb = QCheckBox("Keep Control Panel Always on Top")
+        self.always_on_top_cb.stateChanged.connect(self.toggle_always_on_top)
+
         help_btn = QPushButton("Help / Instructions")
         help_btn.setStyleSheet("background-color: #005A9E; font-weight: bold;")
         help_btn.clicked.connect(self.show_help)
@@ -185,6 +204,7 @@ class ControlPanel(QMainWindow):
         exit_btn.setStyleSheet("background-color: #8b0000; font-weight: bold;")
         exit_btn.clicked.connect(self.exit_app)
 
+        app_group_layout.addWidget(self.always_on_top_cb)
         app_group_layout.addWidget(help_btn)
         app_group_layout.addWidget(exit_btn)
         app_group.setLayout(app_group_layout)
@@ -230,13 +250,21 @@ class ControlPanel(QMainWindow):
         self.ct_slider.valueChanged.connect(self.on_adjustment_changed)
         add_slider_with_label(adj_layout, "Contrast", self.ct_slider, lambda v: f"{v/10.0:.1f}x")
         
-        # Filter
+        # Filter & Flip
         fl_layout = QHBoxLayout()
         fl_layout.addWidget(QLabel("Filter"))
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(["None", "Edge", "Grayscale", "Invert", "Blur", "Sharpen", "Red Tint", "Green Tint", "Blue Tint"])
         self.filter_combo.currentTextChanged.connect(self.on_adjustment_changed)
         fl_layout.addWidget(self.filter_combo)
+
+        self.flip_h_cb = QCheckBox("Flip H")
+        self.flip_v_cb = QCheckBox("Flip V")
+        self.flip_h_cb.stateChanged.connect(self.on_adjustment_changed)
+        self.flip_v_cb.stateChanged.connect(self.on_adjustment_changed)
+        fl_layout.addWidget(self.flip_h_cb)
+        fl_layout.addWidget(self.flip_v_cb)
+
         adj_layout.addLayout(fl_layout)
         
         # Color Keying
@@ -364,56 +392,131 @@ class ControlPanel(QMainWindow):
             self.start_crop_btn.setChecked(False)
             self.preview_view.set_cropping_mode(False)
 
-    def load_image(self, file_path=None):
-        if not file_path:
-            file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg *.tif *.tiff)")
-        
-        if file_path:
-            if self.processor.load_image(file_path):
-                self.current_image_path = file_path
-                self.update_preview()
-                self.info_label.setText("Image loaded.")
-                self.set_tabs_enabled(True)
-                # We need to trigger an update to the overlay
-                self.on_adjustment_changed()
-            else:
-                QMessageBox.critical(self, "Error", "Failed to load image.")
+    def update_layer_combo(self):
+        self.layer_combo.blockSignals(True)
+        self.layer_combo.clear()
+        for i, layer in enumerate(self.processor.layers):
+            self.layer_combo.addItem(f"Layer {i+1}: {layer.name}", userData=i)
 
-    def clear_image(self):
-        """Clears the loaded image from the processor and UI."""
-        self.processor.clear_image()
-        self.current_image_path = None
-        self.set_tabs_enabled(False)
-        self.tabs.setCurrentIndex(0) # Go back to File tab
+        if self.processor.layers:
+            self.layer_combo.setCurrentIndex(self.processor.active_layer_idx)
+            self.set_tabs_enabled(True)
+        else:
+            self.set_tabs_enabled(False)
+            self.preview_view.scene.clear()
+            from PyQt6.QtWidgets import QGraphicsPixmapItem
+            self.preview_view.pixmap_item = QGraphicsPixmapItem()
+            self.preview_view.scene.addItem(self.preview_view.pixmap_item)
 
-        # clear the graphics view
-        self.preview_view.scene.clear()
-        from PyQt6.QtWidgets import QGraphicsPixmapItem
-        self.preview_view.pixmap_item = QGraphicsPixmapItem()
-        self.preview_view.scene.addItem(self.preview_view.pixmap_item)
+        self.layer_combo.blockSignals(False)
 
-        self.info_label.setText("Image cleared.")
+    def on_layer_changed(self, index):
+        if index >= 0:
+            self.processor.set_active_layer(index)
+            self.update_ui_from_active_layer()
 
-        # Reset sliders to default without triggering update signals for each
+    def update_ui_from_active_layer(self):
+        layer = self.processor.get_active_layer()
+        if not layer:
+            return
+
+        self.op_slider.blockSignals(True)
+        self.br_slider.blockSignals(True)
+        self.ct_slider.blockSignals(True)
+        self.filter_combo.blockSignals(True)
+        self.flip_h_cb.blockSignals(True)
+        self.flip_v_cb.blockSignals(True)
         self.x_slider.blockSignals(True)
         self.y_slider.blockSignals(True)
         self.s_slider.blockSignals(True)
         self.r_slider.blockSignals(True)
 
-        self.x_slider.setValue(0)
-        self.y_slider.setValue(0)
-        self.s_slider.setValue(100)
-        self.r_slider.setValue(0)
+        self.op_slider.setValue(int(layer.opacity * 100))
+        self.br_slider.setValue(int(layer.brightness))
+        self.ct_slider.setValue(int(layer.contrast * 10))
+        self.filter_combo.setCurrentText(layer.filter_mode)
 
+        self.flip_h_cb.setChecked(layer.flip_h)
+        self.flip_v_cb.setChecked(layer.flip_v)
+
+        self.x_slider.setValue(int(layer.manual_offset_x))
+        self.y_slider.setValue(int(layer.manual_offset_y))
+        self.s_slider.setValue(int(layer.manual_scale * 100))
+        self.r_slider.setValue(int(layer.manual_rotation))
+
+        self.op_slider.blockSignals(False)
+        self.br_slider.blockSignals(False)
+        self.ct_slider.blockSignals(False)
+        self.filter_combo.blockSignals(False)
+        self.flip_h_cb.blockSignals(False)
+        self.flip_v_cb.blockSignals(False)
         self.x_slider.blockSignals(False)
         self.y_slider.blockSignals(False)
         self.s_slider.blockSignals(False)
         self.r_slider.blockSignals(False)
 
-        self.request_overlay_update()
+        self.update_preview()
+
+    def load_image(self, file_path=None):
+        if not file_path:
+            file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg *.tif *.tiff)")
+        
+        if file_path:
+            if self.processor.add_layer(file_path):
+                self.update_layer_combo()
+                self.update_ui_from_active_layer()
+                self.info_label.setText("Layer added.")
+                self.request_overlay_update()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to load image.")
+
+    def remove_layer(self):
+        idx = self.layer_combo.currentIndex()
+        if idx >= 0:
+            self.processor.remove_layer(idx)
+            self.update_layer_combo()
+            if self.processor.layers:
+                self.update_ui_from_active_layer()
+            else:
+                self.info_label.setText("No layers remaining.")
+            self.request_overlay_update()
+
+    def clear_all_layers(self):
+        """Clears all layers from the processor and UI."""
+        self.processor.clear_all()
+        self.update_layer_combo()
+        self.tabs.setCurrentIndex(0) # Go back to File tab
+
+        self.info_label.setText("All layers cleared.")
+
+    def toggle_always_on_top(self, state):
+        if state == Qt.CheckState.Checked.value:
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        else:
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+        self.show() # Toggling flags hides the window, need to show again
+
+    def perform_autosave(self):
+        """Saves current state to a default autosave.json file."""
+        import os
+        if not self.processor.layers:
+            return
+
+        save_dir = os.path.join(os.path.expanduser("~"), ".overlay_app")
+        os.makedirs(save_dir, exist_ok=True)
+        autosave_path = os.path.join(save_dir, "autosave.json")
+        self._save_project_data(autosave_path, show_msg=False)
+
+    def load_autosave(self):
+        """Loads state from default autosave.json file if it exists."""
+        import os
+        autosave_path = os.path.join(os.path.expanduser("~"), ".overlay_app", "autosave.json")
+        if os.path.exists(autosave_path):
+            self._load_project_data(autosave_path, show_msg=False)
 
     def exit_app(self):
         """Sends a quit signal to the main application."""
+        self.perform_autosave()
         from PyQt6.QtWidgets import QApplication
         QApplication.instance().quit()
 
@@ -547,6 +650,7 @@ class ControlPanel(QMainWindow):
         self.processor.set_brightness(self.br_slider.value())
         self.processor.set_contrast(self.ct_slider.value() / 10.0)
         self.processor.set_filter(self.filter_combo.currentText())
+        self.processor.set_flip(self.flip_h_cb.isChecked(), self.flip_v_cb.isChecked())
         
         key_mode = self.key_combo.currentText()
         if key_mode == "Black":
@@ -636,84 +740,107 @@ class ControlPanel(QMainWindow):
             self.export_image()
 
     def save_project(self):
-        if not hasattr(self, 'current_image_path') or not self.current_image_path:
-            QMessageBox.warning(self, "Error", "No image loaded to save.")
+        if not self.processor.layers:
+            QMessageBox.warning(self, "Error", "No layers loaded to save.")
             return
 
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Project", "", "JSON Files (*.json)")
         if file_name:
-            data = {
-                "image_path": self.current_image_path,
-                "brightness": self.processor.brightness,
-                "contrast": self.processor.contrast,
-                "opacity": self.processor.opacity,
-                "filter": self.processor.filter_mode,
-                "transform": self.processor.transform_matrix.tolist(),
-                "manual_x": self.x_slider.value(),
-                "manual_y": self.y_slider.value(),
-                "manual_scale": self.s_slider.value(),
-                "manual_rot": self.r_slider.value(),
-            }
-            try:
-                with open(file_name, 'w') as f:
-                    json.dump(data, f)
+            self._save_project_data(file_name, show_msg=True)
+
+    def _save_project_data(self, file_name, show_msg=True):
+        layers_data = []
+        for layer in self.processor.layers:
+            layers_data.append({
+                "image_path": layer.file_path,
+                "name": layer.name,
+                "brightness": layer.brightness,
+                "contrast": layer.contrast,
+                "opacity": layer.opacity,
+                "filter": layer.filter_mode,
+                "flip_h": layer.flip_h,
+                "flip_v": layer.flip_v,
+                "transform": layer.transform_matrix.tolist(),
+                "manual_x": layer.manual_offset_x,
+                "manual_y": layer.manual_offset_y,
+                "manual_scale": layer.manual_scale,
+                "manual_rot": layer.manual_rotation,
+            })
+
+        data = {
+            "version": 2,
+            "layers": layers_data,
+            "active_layer_idx": self.processor.active_layer_idx
+        }
+
+        try:
+            with open(file_name, 'w') as f:
+                json.dump(data, f)
+            if show_msg:
                 QMessageBox.information(self, "Success", "Project saved.")
-            except Exception as e:
+        except Exception as e:
+            if show_msg:
                 QMessageBox.critical(self, "Error", f"Failed to save project: {e}")
 
     def load_project(self):
         file_name, _ = QFileDialog.getOpenFileName(self, "Load Project", "", "JSON Files (*.json)")
         if file_name:
-            try:
-                with open(file_name, 'r') as f:
-                    data = json.load(f)
-                
-                # Load image
+            self._load_project_data(file_name, show_msg=True)
+
+    def _load_project_data(self, file_name, show_msg=True):
+        try:
+            with open(file_name, 'r') as f:
+                data = json.load(f)
+
+            self.clear_all_layers()
+
+            # Handle version 1 (single image) vs version 2 (layers)
+            import numpy as np
+            if data.get('version', 1) == 1:
                 if 'image_path' in data:
-                    self.load_image(data['image_path'])
-                else:
-                    raise Exception("Invalid project file: missing image_path")
-
-                # Set UI adjustments
-                # Temporarily block signals to avoid multiple updates
-                self.op_slider.blockSignals(True)
-                self.br_slider.blockSignals(True)
-                self.ct_slider.blockSignals(True)
-                self.filter_combo.blockSignals(True)
-                self.x_slider.blockSignals(True)
-                self.y_slider.blockSignals(True)
-                self.s_slider.blockSignals(True)
-                self.r_slider.blockSignals(True)
-
-                self.op_slider.setValue(int(data.get('opacity', 1.0) * 100))
-                self.br_slider.setValue(int(data.get('brightness', 0)))
-                self.ct_slider.setValue(int(data.get('contrast', 1.0) * 10))
-                self.filter_combo.setCurrentText(data.get('filter', 'None'))
+                    self.processor.add_layer(data['image_path'])
+                    layer = self.processor.get_active_layer()
+                    layer.opacity = data.get('opacity', 1.0)
+                    layer.brightness = data.get('brightness', 0)
+                    layer.contrast = data.get('contrast', 1.0)
+                    layer.filter_mode = data.get('filter', 'None')
+                    layer.flip_h = data.get('flip_h', False)
+                    layer.flip_v = data.get('flip_v', False)
+                    layer.manual_offset_x = data.get('manual_x', 0)
+                    layer.manual_offset_y = data.get('manual_y', 0)
+                    layer.manual_scale = data.get('manual_scale', 100) / 100.0
+                    layer.manual_rotation = data.get('manual_rot', 0)
+                    if 'transform' in data:
+                        layer.transform_matrix = np.array(data['transform'])
+            else:
+                for l_data in data.get('layers', []):
+                    if 'image_path' in l_data and self.processor.add_layer(l_data['image_path'], name=l_data.get('name')):
+                        layer = self.processor.get_active_layer()
+                        layer.opacity = l_data.get('opacity', 1.0)
+                        layer.brightness = l_data.get('brightness', 0)
+                        layer.contrast = l_data.get('contrast', 1.0)
+                        layer.filter_mode = l_data.get('filter', 'None')
+                        layer.flip_h = l_data.get('flip_h', False)
+                        layer.flip_v = l_data.get('flip_v', False)
+                        layer.manual_offset_x = l_data.get('manual_x', 0)
+                        layer.manual_offset_y = l_data.get('manual_y', 0)
+                        layer.manual_scale = l_data.get('manual_scale', 1.0)
+                        layer.manual_rotation = l_data.get('manual_rot', 0)
+                        if 'transform' in l_data:
+                            layer.transform_matrix = np.array(l_data['transform'])
                 
-                self.x_slider.setValue(data.get('manual_x', 0))
-                self.y_slider.setValue(data.get('manual_y', 0))
-                self.s_slider.setValue(data.get('manual_scale', 100))
-                self.r_slider.setValue(data.get('manual_rot', 0))
+                self.processor.set_active_layer(data.get('active_layer_idx', 0))
 
-                self.op_slider.blockSignals(False)
-                self.br_slider.blockSignals(False)
-                self.ct_slider.blockSignals(False)
-                self.filter_combo.blockSignals(False)
-                self.x_slider.blockSignals(False)
-                self.y_slider.blockSignals(False)
-                self.s_slider.blockSignals(False)
-                self.r_slider.blockSignals(False)
+            self.processor.apply_all_transforms()
+            self.update_layer_combo()
+            self.update_ui_from_active_layer()
+            self.request_overlay_update()
 
-                # Set processor state
-                import numpy as np
-                if 'transform' in data:
-                    self.processor.transform_matrix = np.array(data['transform'])
-                
-                self.on_adjustment_changed()
-                self.on_transform_changed()
+            if show_msg:
                 self.info_label.setText("Project loaded successfully.")
-                
-            except Exception as e:
+
+        except Exception as e:
+            if show_msg:
                 QMessageBox.critical(self, "Error", f"Failed to load project: {e}")
 
     def export_image(self):

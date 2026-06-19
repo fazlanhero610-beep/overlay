@@ -59,6 +59,9 @@ class AppManager(QObject):
         self.hotkey_manager.opacity_up_signal.connect(lambda: self.adjust_opacity(5))
         self.hotkey_manager.opacity_down_signal.connect(lambda: self.adjust_opacity(-5))
 
+        # Load autosave if exists
+        self.control_panel.load_autosave()
+
         # Show control panel on startup
         self.show_control_panel()
 
@@ -102,20 +105,15 @@ class AppManager(QObject):
     def process_snip(self, pixmap):
         self.control_panel.show()
         if not pixmap.isNull():
-            import tempfile
             import os
-            # Save QPixmap to temp file and load it via ImageProcessor
-            # OpenCV doesn't natively consume QPixmap easily without conversion logic
-            fd, path = tempfile.mkstemp(suffix=".png")
-            os.close(fd)
+            # Save QPixmap to a persistent app-data file instead of a temp file
+            # so that saving "Projects" works correctly.
+            save_dir = os.path.join(os.path.expanduser("~"), ".overlay_app")
+            os.makedirs(save_dir, exist_ok=True)
+            path = os.path.join(save_dir, "last_snip.png")
+
             pixmap.save(path, "PNG")
             self.control_panel.load_image(path)
-
-            # Clean up temp file safely
-            try:
-                os.remove(path)
-            except:
-                pass
 
     def process_alignment(self, screen_points):
         self.control_panel.show()
@@ -190,6 +188,7 @@ class AppManager(QObject):
 
     def quit_app(self):
         print("Quitting application...")
+        self.control_panel.perform_autosave()
         if hasattr(self, 'hotkey_manager'):
             self.hotkey_manager.cleanup()
         self.app.quit()
