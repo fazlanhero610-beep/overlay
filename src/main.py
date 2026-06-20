@@ -11,7 +11,8 @@ from ui.app_manager import AppManager
 
 def main():
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False) # Keep running in the background for system tray
+    # Allow the app to exit cleanly if all windows (like the main Control Panel) are closed by the user natively.
+    app.setQuitOnLastWindowClosed(True)
     
     # Try to set an icon
     icon = app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)

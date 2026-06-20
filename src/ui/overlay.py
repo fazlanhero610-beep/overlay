@@ -1,8 +1,10 @@
-from PyQt6.QtWidgets import QWidget, QLabel
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QApplication
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPalette
 
 class OverlayWindow(QWidget):
+    on_screen_transform = pyqtSignal(int, int, float, float) # dx, dy, d_scale, d_rot
+
     def __init__(self):
         super().__init__()
         
@@ -24,12 +26,78 @@ class OverlayWindow(QWidget):
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("background-color: transparent;")
         
+        # Setup close button
+        self.close_btn = QPushButton("X", self)
+        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 0, 0, 150);
+                color: white;
+                font-weight: bold;
+                border-radius: 15px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 0, 0, 200);
+            }
+        """)
+        self.close_btn.clicked.connect(self.hide)
+
         # We start hidden and unlocked
         self.is_locked = False
         
+        # On-screen Edit Mode state
+        self.is_edit_mode = False
+        self._drag_start_pos = None
+        self._is_rotating = False
+
+    def set_edit_mode(self, active: bool):
+        self.is_edit_mode = active
+        if active:
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            # Ensure it is unlocked to receive clicks
+            if self.is_locked:
+                self.toggle_lock()
+            self.setStyleSheet("background-color: rgba(0, 100, 255, 30);") # Visual indicator
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setStyleSheet("background-color: transparent;")
+
+    def mousePressEvent(self, event):
+        if self.is_edit_mode and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.globalPosition().toPoint()
+            # If shift is held, we are rotating instead of translating
+            self._is_rotating = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier)
+
+    def mouseMoveEvent(self, event):
+        if self.is_edit_mode and self._drag_start_pos is not None:
+            current_pos = event.globalPosition().toPoint()
+            delta = current_pos - self._drag_start_pos
+
+            if self._is_rotating:
+                # Map X delta to rotation degrees
+                d_rot = delta.x() * 0.5
+                self.on_screen_transform.emit(0, 0, 0, d_rot)
+            else:
+                self.on_screen_transform.emit(delta.x(), delta.y(), 0, 0)
+
+            self._drag_start_pos = current_pos
+
+    def mouseReleaseEvent(self, event):
+        if self.is_edit_mode and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = None
+            self._is_rotating = False
+
+    def wheelEvent(self, event):
+        if self.is_edit_mode:
+            # Map wheel to scaling
+            d_scale = 5.0 if event.angleDelta().y() > 0 else -5.0
+            self.on_screen_transform.emit(0, 0, d_scale, 0)
+
     def resizeEvent(self, event):
         # Ensure image label fills the window
         self.image_label.setGeometry(0, 0, self.width(), self.height())
+        # Keep close button in top right
+        self.close_btn.move(self.width() - 35, 5)
         super().resizeEvent(event)
         
     def set_image(self, pixmap: QPixmap):
