@@ -1,8 +1,14 @@
 import cv2
 import numpy as np
-import mss
 import time
 from PyQt6.QtCore import QThread, pyqtSignal
+
+try:
+    import mss
+    MSS_AVAILABLE = True
+except ImportError:
+    MSS_AVAILABLE = False
+    print("Warning: 'mss' module not found. Live tracking will be disabled. Run 'pip install mss' to enable.")
 
 class FeatureTracker(QThread):
     # Emits (dx, dy, d_angle) showing the delta from the original template position
@@ -27,7 +33,10 @@ class FeatureTracker(QThread):
         )
 
         # Initialize MSS for fast screen capture
-        self.sct = mss.mss()
+        if MSS_AVAILABLE:
+            self.sct = mss.mss()
+        else:
+            self.sct = None
 
         # OpenCV tracking setup using ORB features
         self.orb = cv2.ORB_create()
@@ -41,6 +50,9 @@ class FeatureTracker(QThread):
         self._initialize_template()
 
     def _initialize_template(self):
+        if not MSS_AVAILABLE:
+            return
+
         monitor = {
             "top": self.template_region[1],
             "left": self.template_region[0],
@@ -63,6 +75,11 @@ class FeatureTracker(QThread):
         )
 
     def run(self):
+        if not MSS_AVAILABLE:
+            print("Cannot run tracker without 'mss' module.")
+            self.tracking_lost.emit()
+            return
+
         if self.template_descriptors is None or len(self.template_keypoints) < 10:
             print("Not enough features found in the template to track.")
             self.tracking_lost.emit()

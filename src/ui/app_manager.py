@@ -140,12 +140,15 @@ class AppManager(QObject):
         # Apply tracking absolute deltas to the initial offsets to prevent runaway loops
         layer = self.image_processor.get_active_layer()
         if layer:
+            # Tell processor to ONLY update transform, skip heavy filtering pipeline
             self.image_processor.set_manual_transform(
                 self.tracking_initial_x + dx,
                 self.tracking_initial_y + dy,
                 layer.manual_scale,
-                self.tracking_initial_rot + d_angle
+                self.tracking_initial_rot + d_angle,
+                fast_mode=True
             )
+
             # Update sliders silently
             self.control_panel.x_slider.blockSignals(True)
             self.control_panel.y_slider.blockSignals(True)

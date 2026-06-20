@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QLabel
+from PyQt6.QtWidgets import QWidget, QLabel, QPushButton
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QColor, QPalette
 
@@ -24,12 +24,30 @@ class OverlayWindow(QWidget):
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("background-color: transparent;")
         
+        # Setup close button
+        self.close_btn = QPushButton("X", self)
+        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 0, 0, 150);
+                color: white;
+                font-weight: bold;
+                border-radius: 15px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 0, 0, 200);
+            }
+        """)
+        self.close_btn.clicked.connect(self.hide)
+
         # We start hidden and unlocked
         self.is_locked = False
         
     def resizeEvent(self, event):
         # Ensure image label fills the window
         self.image_label.setGeometry(0, 0, self.width(), self.height())
+        # Keep close button in top right
+        self.close_btn.move(self.width() - 35, 5)
         super().resizeEvent(event)
         
     def set_image(self, pixmap: QPixmap):

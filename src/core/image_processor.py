@@ -8,7 +8,10 @@ class ImageLayer:
         self.name = "Layer"
         self.file_path = None
         self.original_image = None
-        self.current_image = None
+
+        # Cached Pipeline States
+        self.cached_filtered = None # Image after filter, brightness, contrast, flip, chroma key
+        self.current_image = None   # Image after opacity applied to cached_filtered
         self.warped_image = None
         
         # State
@@ -162,7 +165,16 @@ class ImageProcessor:
         layer = self.get_active_layer()
         if layer:
             layer.opacity = value
-            self.process_layer(self.active_layer_idx)
+            # Only need to reapply opacity and composite, skip heavy filtering
+            if layer.cached_filtered is not None:
+                img = layer.cached_filtered.copy()
+                alpha_channel = img[:, :, 3].copy()
+                img[:, :, 3] = (alpha_channel * layer.opacity).astype(np.uint8)
+                layer.current_image = img
+                self.apply_layer_transform(self.active_layer_idx)
+                self.composite_layers()
+            else:
+                self.process_layer(self.active_layer_idx)
         
     def set_filter(self, filter_mode):
         layer = self.get_active_layer()
@@ -189,7 +201,7 @@ class ImageProcessor:
         self.screen_height = h
         self.apply_all_transforms()
 
-    def set_manual_transform(self, x, y, scale, rotation):
+    def set_manual_transform(self, x, y, scale, rotation, fast_mode=False):
         layer = self.get_active_layer()
         if layer:
             layer.manual_offset_x = x
@@ -259,13 +271,18 @@ class ImageProcessor:
             ])
             mask = cv2.inRange(img[:, :, :3], lower_bound, upper_bound)
             alpha_channel[mask == 255] = 0
+            img[:, :, 3] = alpha_channel # Update alpha before flip
 
-        # 4. Apply Opacity to Alpha Channel
-        img[:, :, 3] = (alpha_channel * layer.opacity).astype(np.uint8)
-
-        # 5. Apply Flipping
+        # 4. Apply Flipping
         if layer.flip_h: img = cv2.flip(img, 1)
         if layer.flip_v: img = cv2.flip(img, 0)
+
+        # Cache the heavy processing result
+        layer.cached_filtered = img.copy()
+
+        # 5. Apply Opacity to Alpha Channel
+        alpha_channel_cached = img[:, :, 3].copy()
+        img[:, :, 3] = (alpha_channel_cached * layer.opacity).astype(np.uint8)
 
         layer.current_image = img
         self.apply_layer_transform(idx)
