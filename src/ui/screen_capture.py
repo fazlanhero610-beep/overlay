@@ -5,6 +5,7 @@ from PyQt6.QtGui import QPainter, QColor, QPixmap
 class ScreenCaptureWindow(QWidget):
     points_selected = pyqtSignal(list) # Emits list of (x,y) tuples
     region_captured = pyqtSignal(QPixmap) # Emits captured region when in snipping mode
+    tracking_region_selected = pyqtSignal(int, int, int, int) # x, y, w, h
     
     def __init__(self):
         super().__init__()
@@ -25,6 +26,7 @@ class ScreenCaptureWindow(QWidget):
         
         # Snipping mode state
         self.snipping_mode = False
+        self.tracking_mode = False
         self.snip_start = QPoint()
         self.snip_current = QPoint()
         self.is_dragging = False
@@ -49,11 +51,12 @@ class ScreenCaptureWindow(QWidget):
         
         self.update_label_text()
         self.label.move(self.width() // 2 - self.label.width() // 2, 50)
-        
+
         self.loupe_timer.start(30) # ~30fps loupe update
 
     def start_snip(self):
         self.snipping_mode = True
+        self.tracking_mode = False
         self._setup_window()
         self.is_dragging = False
 
@@ -62,6 +65,18 @@ class ScreenCaptureWindow(QWidget):
         self.label.move(self.width() // 2 - self.label.width() // 2, 50)
 
         self.loupe_timer.stop() # No loupe in snipping mode
+
+    def start_tracking_selection(self):
+        self.snipping_mode = True # We use the same dragging logic
+        self.tracking_mode = True
+        self._setup_window()
+        self.is_dragging = False
+
+        self.label.setText("Draw a box around the feature you want to track. Press ESC to cancel.")
+        self.label.adjustSize()
+        self.label.move(self.width() // 2 - self.label.width() // 2, 50)
+
+        self.loupe_timer.stop()
 
     def _setup_window(self):
         screen = self.screen()
@@ -171,19 +186,28 @@ class ScreenCaptureWindow(QWidget):
             
             rect = QRect(self.snip_start, self.snip_current).normalized()
             if rect.width() > 5 and rect.height() > 5:
-                # Capture the region
                 self.hide() # Hide overlay so we don't capture the overlay UI itself
-
-                # Small delay to ensure hide completes
                 QApplication.processEvents()
 
-                screen = QApplication.primaryScreen()
-                if screen:
-                    pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
-                    self.region_captured.emit(pixmap)
+                if self.tracking_mode:
+                    # Emit coordinates directly for tracking
+                    # We add global desktop offset if window is moved, but we assume it fills virtual geometry
+                    geom = self.geometry()
+                    global_x = geom.x() + rect.x()
+                    global_y = geom.y() + rect.y()
+                    self.tracking_region_selected.emit(global_x, global_y, rect.width(), rect.height())
+                else:
+                    # Snip mode: Capture pixel region
+                    screen = QApplication.primaryScreen()
+                    if screen:
+                        pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
+                        self.region_captured.emit(pixmap)
             else:
                 self.hide()
-                self.region_captured.emit(QPixmap()) # Cancelled/Too small
+                if self.tracking_mode:
+                    self.tracking_region_selected.emit(0, 0, 0, 0)
+                else:
+                    self.region_captured.emit(QPixmap()) # Cancelled/Too small
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

@@ -8,6 +8,7 @@ from ui.control_panel import ControlPanel
 from ui.screen_capture import ScreenCaptureWindow
 from ui.hotkey_settings import HotkeySettingsDialog, load_hotkey_config, save_hotkey_config
 from core.image_processor import ImageProcessor
+from core.tracker import FeatureTracker
 from PyQt6.QtGui import QPixmap
 
 class AppManager(QObject):
@@ -17,6 +18,7 @@ class AppManager(QObject):
         
         # Initialize core
         self.image_processor = ImageProcessor()
+        self.tracker = None
         
         # Initialize windows
         self.overlay_window = OverlayWindow()
@@ -27,8 +29,12 @@ class AppManager(QObject):
         self.control_panel.update_callback = self.update_overlay_image
         self.control_panel.request_screen_alignment.connect(self.start_screen_alignment)
         self.control_panel.request_screen_snip.connect(self.start_screen_snip)
+        self.control_panel.request_tracking_start.connect(self.start_tracking_selection)
+        self.control_panel.request_tracking_stop.connect(self.stop_tracking)
+
         self.screen_capture.points_selected.connect(self.process_alignment)
         self.screen_capture.region_captured.connect(self.process_snip)
+        self.screen_capture.tracking_region_selected.connect(self.process_tracking_selection)
         
         self.setup_tray()
         
@@ -101,6 +107,68 @@ class AppManager(QObject):
     def start_screen_snip(self):
         self.control_panel.hide()
         self.screen_capture.start_snip()
+
+    def start_tracking_selection(self):
+        self.control_panel.hide()
+        self.screen_capture.start_tracking_selection()
+
+    def process_tracking_selection(self, x, y, w, h):
+        self.control_panel.show()
+        if w > 0 and h > 0:
+            self.stop_tracking() # Stop any existing
+
+            # Store initial offsets so absolute deltas apply correctly
+            layer = self.image_processor.get_active_layer()
+            if layer:
+                self.tracking_initial_x = layer.manual_offset_x
+                self.tracking_initial_y = layer.manual_offset_y
+                self.tracking_initial_rot = layer.manual_rotation
+            else:
+                self.tracking_initial_x = 0
+                self.tracking_initial_y = 0
+                self.tracking_initial_rot = 0
+
+            self.tracker = FeatureTracker((x, y, w, h))
+            self.tracker.tracking_update.connect(self.on_tracking_update)
+            self.tracker.tracking_lost.connect(self.on_tracking_lost)
+            self.tracker.start()
+            self.control_panel.info_label.setText("Tracking started! Move the jig and the image will follow.")
+        else:
+            self.control_panel.info_label.setText("Tracking selection cancelled.")
+
+    def on_tracking_update(self, dx, dy, d_angle):
+        # Apply tracking absolute deltas to the initial offsets to prevent runaway loops
+        layer = self.image_processor.get_active_layer()
+        if layer:
+            self.image_processor.set_manual_transform(
+                self.tracking_initial_x + dx,
+                self.tracking_initial_y + dy,
+                layer.manual_scale,
+                self.tracking_initial_rot + d_angle
+            )
+            # Update sliders silently
+            self.control_panel.x_slider.blockSignals(True)
+            self.control_panel.y_slider.blockSignals(True)
+            self.control_panel.r_slider.blockSignals(True)
+
+            self.control_panel.x_slider.setValue(int(layer.manual_offset_x))
+            self.control_panel.y_slider.setValue(int(layer.manual_offset_y))
+            self.control_panel.r_slider.setValue(int(layer.manual_rotation))
+
+            self.control_panel.x_slider.blockSignals(False)
+            self.control_panel.y_slider.blockSignals(False)
+            self.control_panel.r_slider.blockSignals(False)
+
+            self.update_overlay_image()
+
+    def on_tracking_lost(self):
+        self.stop_tracking()
+        self.control_panel.info_label.setText("Tracking lost or stopped. You can try selecting a clearer feature.")
+
+    def stop_tracking(self):
+        if self.tracker and self.tracker.isRunning():
+            self.tracker.stop()
+            self.tracker = None
 
     def process_snip(self, pixmap):
         self.control_panel.show()
@@ -188,6 +256,7 @@ class AppManager(QObject):
 
     def quit_app(self):
         print("Quitting application...")
+        self.stop_tracking()
         self.control_panel.perform_autosave()
         if hasattr(self, 'hotkey_manager'):
             self.hotkey_manager.cleanup()

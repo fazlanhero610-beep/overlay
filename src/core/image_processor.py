@@ -372,9 +372,12 @@ class ImageProcessor:
             # Prevent division by zero
             safe_alpha = np.where(out_alpha == 0, 1.0, out_alpha)
 
-            # Blend colors
-            for c in range(3):
-                canvas[:, :, c] = (src[:, :, c] * alpha_src + canvas[:, :, c] * alpha_canvas * (1 - alpha_src)) / safe_alpha
+            # Blend colors vectorized
+            alpha_src_3d = np.expand_dims(alpha_src, axis=-1)
+            alpha_canvas_3d = np.expand_dims(alpha_canvas, axis=-1)
+            safe_alpha_3d = np.expand_dims(safe_alpha, axis=-1)
+
+            canvas[:, :, :3] = (src[:, :, :3] * alpha_src_3d + canvas[:, :, :3] * alpha_canvas_3d * (1 - alpha_src_3d)) / safe_alpha_3d
 
             canvas[:, :, 3] = (out_alpha * 255).astype(np.uint8)
 

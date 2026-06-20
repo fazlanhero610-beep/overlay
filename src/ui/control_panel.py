@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSlider, QComboBox, QFileDialog, QGroupBox, QMessageBox,
     QCheckBox, QDialog, QScrollArea, QSplitter, QTabWidget, QColorDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QColor
 import json
 
@@ -14,6 +14,8 @@ class ControlPanel(QMainWindow):
     # Signals to request screen alignment from main AppManager
     request_screen_alignment = pyqtSignal(int) # int is number of points (1, 2, 3)
     request_screen_snip = pyqtSignal()
+    request_tracking_start = pyqtSignal()
+    request_tracking_stop = pyqtSignal()
     
     def __init__(self, processor: ImageProcessor):
         super().__init__()
@@ -100,6 +102,11 @@ class ControlPanel(QMainWindow):
         self.selected_image_points = []
         self.num_points_needed = 0
         self.selecting_image_points = False
+
+        # Debounce timer for adjustments to fix lag
+        self.adjustment_timer = QTimer()
+        self.adjustment_timer.setSingleShot(True)
+        self.adjustment_timer.timeout.connect(self._apply_adjustments)
 
         self._init_ui()
 
@@ -369,9 +376,30 @@ class ControlPanel(QMainWindow):
         self.start_align_btn = QPushButton("Start Alignment Process")
         self.start_align_btn.clicked.connect(self.start_alignment_process)
         align_group_layout.addWidget(self.start_align_btn)
-        
+
         align_group.setLayout(align_group_layout)
         align_layout.addWidget(align_group)
+
+        # Tracking Group
+        track_group = QGroupBox("Live Tracking")
+        track_group_layout = QVBoxLayout()
+
+        track_info = QLabel("Draw a box around a distinct feature on your screen. The app will visually track that feature and auto-move your image.")
+        track_info.setWordWrap(True)
+        track_group_layout.addWidget(track_info)
+
+        btn_layout = QHBoxLayout()
+        start_track_btn = QPushButton("Start Live Tracking")
+        start_track_btn.clicked.connect(self.request_tracking_start.emit)
+        stop_track_btn = QPushButton("Stop Tracking")
+        stop_track_btn.clicked.connect(self.request_tracking_stop.emit)
+
+        btn_layout.addWidget(start_track_btn)
+        btn_layout.addWidget(stop_track_btn)
+        track_group_layout.addLayout(btn_layout)
+
+        track_group.setLayout(track_group_layout)
+        align_layout.addWidget(track_group)
 
         align_layout.addStretch()
         self.tabs.addTab(align_tab, "Alignment")
@@ -645,6 +673,10 @@ class ControlPanel(QMainWindow):
         self.on_adjustment_changed()
 
     def on_adjustment_changed(self):
+        # Start or restart the debounce timer
+        self.adjustment_timer.start(50) # 50ms delay
+
+    def _apply_adjustments(self):
         # Update processor state
         self.processor.set_opacity(self.op_slider.value() / 100.0)
         self.processor.set_brightness(self.br_slider.value())
@@ -664,11 +696,6 @@ class ControlPanel(QMainWindow):
         
         self.update_preview()
         
-        # The main AppManager handles pushing the processed image to the overlay
-        # We need a signal for that. Let's emit a custom signal if needed, 
-        # or have AppManager connect to these sliders. 
-        # Since we passed processor by reference, it's updated. 
-        # We just need to tell AppManager to refresh.
         self.request_overlay_update()
 
     def request_overlay_update(self):
