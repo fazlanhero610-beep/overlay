@@ -38,9 +38,13 @@ class FeatureTracker(QThread):
         else:
             self.sct = None
 
-        # OpenCV tracking setup using ORB features
-        self.orb = cv2.ORB_create()
-        self.matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+        # OpenCV tracking setup using SIFT features (better for text and smooth details)
+        self.sift = cv2.SIFT_create()
+
+        # SIFT uses L2 distance
+        index_params = dict(algorithm=1, trees=5) # KDTree
+        search_params = dict(checks=50)
+        self.matcher = cv2.FlannBasedMatcher(index_params, search_params)
 
         self.template_keypoints = None
         self.template_descriptors = None
@@ -65,8 +69,8 @@ class FeatureTracker(QThread):
         img = np.array(sct_img)
         gray = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
 
-        # Compute ORB features for the template
-        self.template_keypoints, self.template_descriptors = self.orb.detectAndCompute(gray, None)
+        # Compute SIFT features for the template
+        self.template_keypoints, self.template_descriptors = self.sift.detectAndCompute(gray, None)
 
         # Calculate center of the original template in absolute screen coordinates
         self.template_center = (
@@ -80,8 +84,9 @@ class FeatureTracker(QThread):
             self.tracking_lost.emit()
             return
 
-        if self.template_descriptors is None or len(self.template_keypoints) < 10:
-            print("Not enough features found in the template to track.")
+        # Lowered threshold to 4 (minimum needed for homography) so we don't bail on small text features easily
+        if self.template_descriptors is None or len(self.template_keypoints) < 4:
+            print(f"Not enough features found in the template to track. Found: {len(self.template_keypoints) if self.template_keypoints else 0}")
             self.tracking_lost.emit()
             return
 
@@ -104,17 +109,21 @@ class FeatureTracker(QThread):
                 frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
 
                 # Detect features in the new frame
-                kp, des = self.orb.detectAndCompute(frame_gray, None)
+                kp, des = self.sift.detectAndCompute(frame_gray, None)
 
-                if des is not None and len(kp) >= 10:
-                    # Match features between template and current frame
-                    matches = self.matcher.match(self.template_descriptors, des)
+                if des is not None and len(kp) >= 4:
+                    # Match features using KNN
+                    matches = self.matcher.knnMatch(self.template_descriptors, des, k=2)
 
-                    # Sort them in the order of their distance (lower is better)
-                    matches = sorted(matches, key=lambda x: x.distance)
-
-                    # Keep the top matches (e.g., top 15%)
-                    good_matches = matches[:int(len(matches) * 0.15)]
+                    # Apply Lowe's ratio test to filter out bad matches
+                    good_matches = []
+                    for match_set in matches:
+                        if len(match_set) == 2:
+                            m, n = match_set
+                            if m.distance < 0.7 * n.distance:
+                                good_matches.append(m)
+                        elif len(match_set) == 1:
+                            good_matches.append(match_set[0])
 
                     if len(good_matches) >= 4: # Need at least 4 for affine transform
                         # Extract the matched keypoints

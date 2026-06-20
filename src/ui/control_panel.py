@@ -16,12 +16,15 @@ class ControlPanel(QMainWindow):
     request_screen_snip = pyqtSignal()
     request_tracking_start = pyqtSignal()
     request_tracking_stop = pyqtSignal()
+    request_edit_overlay = pyqtSignal(bool)
     
     def __init__(self, processor: ImageProcessor):
         super().__init__()
         self.processor = processor
         self.setWindowTitle("Image Overlay Control Panel")
-        self.setMinimumSize(400, 600)
+        # Increase initial size slightly so tabs fit nicely, but ensure it remains fully resizable
+        self.resize(1000, 700)
+        self.setMinimumSize(600, 400)
         
         # Apply modern dark theme stylesheet
         self.setStyleSheet("""
@@ -333,6 +336,16 @@ class ControlPanel(QMainWindow):
         nudge_lbl.setStyleSheet("color: #888888; font-size: 10px;")
         transform_layout.addWidget(nudge_lbl)
 
+        # On-Screen Edit Button
+        self.edit_overlay_btn = QPushButton("Edit Overlay On-Screen")
+        self.edit_overlay_btn.setCheckable(True)
+        self.edit_overlay_btn.setStyleSheet("""
+            QPushButton { background-color: #005A9E; font-weight: bold; }
+            QPushButton:checked { background-color: #A0C4FF; color: black; }
+        """)
+        self.edit_overlay_btn.clicked.connect(self.on_edit_overlay_toggled)
+        transform_layout.addWidget(self.edit_overlay_btn)
+
         transform_layout.addStretch()
         self.tabs.addTab(transform_tab, "Transform")
         
@@ -625,6 +638,13 @@ class ControlPanel(QMainWindow):
         self.processor.set_overlay_tools(self.crosshair_cb.isChecked(), self.grid_cb.isChecked())
         self.request_overlay_update()
 
+    def on_edit_overlay_toggled(self, checked):
+        if checked:
+            self.edit_overlay_btn.setText("Lock Overlay (Done Editing)")
+        else:
+            self.edit_overlay_btn.setText("Edit Overlay On-Screen")
+        self.request_edit_overlay.emit(checked)
+
     def on_transform_changed(self):
         x = self.x_slider.value()
         y = self.y_slider.value()
@@ -675,27 +695,33 @@ class ControlPanel(QMainWindow):
     def on_adjustment_changed(self):
         # Start or restart the debounce timer
         self.adjustment_timer.start(50) # 50ms delay
-
-    def _apply_adjustments(self):
-        # Update processor state
-        self.processor.set_opacity(self.op_slider.value() / 100.0)
-        self.processor.set_brightness(self.br_slider.value())
-        self.processor.set_contrast(self.ct_slider.value() / 10.0)
-        self.processor.set_filter(self.filter_combo.currentText())
-        self.processor.set_flip(self.flip_h_cb.isChecked(), self.flip_v_cb.isChecked())
         
+    def _apply_adjustments(self):
+        # Determine Color Key values
         key_mode = self.key_combo.currentText()
+        k_color = None
         if key_mode == "Black":
-            self.processor.set_color_key((0, 0, 0), self.key_tol_slider.value())
+            k_color = (0, 0, 0)
         elif key_mode == "White":
-            self.processor.set_color_key((255, 255, 255), self.key_tol_slider.value())
+            k_color = (255, 255, 255)
         elif key_mode == "Custom..." and self.custom_color is not None:
-            self.processor.set_color_key(self.custom_color, self.key_tol_slider.value())
-        else:
-            self.processor.set_color_key(None, 0)
+            k_color = self.custom_color
+
+        k_tol = self.key_tol_slider.value()
+        
+        # Call bulk update once to avoid redundant processing lag
+        self.processor.bulk_update_adjustments(
+            opacity=self.op_slider.value() / 100.0,
+            brightness=self.br_slider.value(),
+            contrast=self.ct_slider.value() / 10.0,
+            filter_mode=self.filter_combo.currentText(),
+            flip_h=self.flip_h_cb.isChecked(),
+            flip_v=self.flip_v_cb.isChecked(),
+            key_color=k_color,
+            key_tol=k_tol
+        )
         
         self.update_preview()
-        
         self.request_overlay_update()
 
     def request_overlay_update(self):

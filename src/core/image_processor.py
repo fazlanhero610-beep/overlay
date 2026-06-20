@@ -149,6 +149,43 @@ class ImageProcessor:
         layer = self.get_active_layer()
         if layer: layer.transform_matrix = val
 
+    def bulk_update_adjustments(self, opacity, brightness, contrast, filter_mode, flip_h, flip_v, key_color, key_tol):
+        """Updates all adjustments at once and processes the layer efficiently."""
+        layer = self.get_active_layer()
+        if not layer: return
+
+        # Check if heavy processing variables changed
+        heavy_changed = (
+            layer.brightness != brightness or
+            layer.contrast != contrast or
+            layer.filter_mode != filter_mode or
+            layer.flip_h != flip_h or
+            layer.flip_v != flip_v or
+            layer.key_color != key_color or
+            layer.key_tolerance != key_tol
+        )
+
+        layer.opacity = opacity
+        layer.brightness = brightness
+        layer.contrast = contrast
+        layer.filter_mode = filter_mode
+        layer.flip_h = flip_h
+        layer.flip_v = flip_v
+        layer.key_color = key_color
+        layer.key_tolerance = key_tol
+
+        if heavy_changed or layer.cached_filtered is None:
+            self.process_layer(self.active_layer_idx)
+        else:
+            # Only opacity changed, use cached fast-path
+            img = layer.cached_filtered.copy()
+            alpha_channel = img[:, :, 3].copy()
+            img[:, :, 3] = (alpha_channel * layer.opacity).astype(np.uint8)
+            layer.current_image = img
+            self.apply_layer_transform(self.active_layer_idx)
+            self.composite_layers()
+
+    # Keep individual setters for backwards compatibility if needed, but make them fast
     def set_brightness(self, value):
         layer = self.get_active_layer()
         if layer:
@@ -165,7 +202,6 @@ class ImageProcessor:
         layer = self.get_active_layer()
         if layer:
             layer.opacity = value
-            # Only need to reapply opacity and composite, skip heavy filtering
             if layer.cached_filtered is not None:
                 img = layer.cached_filtered.copy()
                 alpha_channel = img[:, :, 3].copy()

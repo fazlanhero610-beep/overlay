@@ -23,6 +23,11 @@ class AppManager(QObject):
         # Initialize windows
         self.overlay_window = OverlayWindow()
         self.control_panel = ControlPanel(self.image_processor)
+
+        # Tie Control Panel's native close event to our custom quit_app to ensure autosaves happen cleanly
+        # and background hotkey threads are safely killed.
+        self.control_panel.closeEvent = self._on_control_panel_close
+
         self.screen_capture = ScreenCaptureWindow()
         
         # Connect signals
@@ -31,6 +36,9 @@ class AppManager(QObject):
         self.control_panel.request_screen_snip.connect(self.start_screen_snip)
         self.control_panel.request_tracking_start.connect(self.start_tracking_selection)
         self.control_panel.request_tracking_stop.connect(self.stop_tracking)
+        self.control_panel.request_edit_overlay.connect(self.toggle_on_screen_edit)
+
+        self.overlay_window.on_screen_transform.connect(self.process_on_screen_transform)
 
         self.screen_capture.points_selected.connect(self.process_alignment)
         self.screen_capture.region_captured.connect(self.process_snip)
@@ -164,6 +172,43 @@ class AppManager(QObject):
 
             self.update_overlay_image()
 
+    def toggle_on_screen_edit(self, active):
+        self.overlay_window.set_edit_mode(active)
+        if active:
+            self.control_panel.info_label.setText("On-Screen Edit Mode: Drag to move, Scroll to scale, Shift+Drag to rotate.")
+        else:
+            self.control_panel.info_label.setText("On-Screen Edit Mode disabled.")
+
+    def process_on_screen_transform(self, dx, dy, d_scale, d_rot):
+        layer = self.image_processor.get_active_layer()
+        if not layer: return
+
+        self.image_processor.set_manual_transform(
+            layer.manual_offset_x + dx,
+            layer.manual_offset_y + dy,
+            layer.manual_scale + (d_scale / 100.0), # convert from percentage
+            layer.manual_rotation + d_rot,
+            fast_mode=True
+        )
+
+        # Sync UI
+        self.control_panel.x_slider.blockSignals(True)
+        self.control_panel.y_slider.blockSignals(True)
+        self.control_panel.s_slider.blockSignals(True)
+        self.control_panel.r_slider.blockSignals(True)
+
+        self.control_panel.x_slider.setValue(int(layer.manual_offset_x))
+        self.control_panel.y_slider.setValue(int(layer.manual_offset_y))
+        self.control_panel.s_slider.setValue(int(layer.manual_scale * 100))
+        self.control_panel.r_slider.setValue(int(layer.manual_rotation))
+
+        self.control_panel.x_slider.blockSignals(False)
+        self.control_panel.y_slider.blockSignals(False)
+        self.control_panel.s_slider.blockSignals(False)
+        self.control_panel.r_slider.blockSignals(False)
+
+        self.update_overlay_image()
+
     def on_tracking_lost(self):
         self.stop_tracking()
         self.control_panel.info_label.setText("Tracking lost or stopped. You can try selecting a clearer feature.")
@@ -256,6 +301,11 @@ class AppManager(QObject):
             
             # Update tray tooltip or actions if needed (optional)
             self.tray_menu.actions()[0].setText(f"Show Control Panel ({self.hotkey_manager.hotkeys['show_control_panel']})")
+
+    def _on_control_panel_close(self, event):
+        # Trigger full application cleanup and exit when Control Panel is closed natively.
+        self.quit_app()
+        event.accept()
 
     def quit_app(self):
         print("Quitting application...")
